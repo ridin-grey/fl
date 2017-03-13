@@ -2,7 +2,7 @@ from cx_Freeze import setup, Executable
 
 # Dependencies are automatically detected, but it might need
 # fine tuning.
-buildOptions = dict(packages = [], excludes = [], includes = ['os'], include_files = ['bin', 'fl_conf.json', 'home'], include_msvcr = True)
+buildOptions = dict(packages = [], excludes = [], includes = ['os'], include_files = ['bin', 'fl_conf.json'], include_msvcr = True)
 
 import sys
 base = 'Win32GUI' if sys.platform=='win32' else None
@@ -48,7 +48,7 @@ msi_data = {"Shortcut": shortcut_table}
 bdist_msi_options = {'data': msi_data, 'upgrade_code': '{9cb335e4-90f1-4e69-8c00-131f72fd9655}'}
 
 setup(name='FlexiLigner Sync',
-      version = '0.3.5',
+      version = '0.4.0',
       author = 'Igor Zhidkov',
       author_email = 'igorzhidkoff@gmail.com',
       description = 'FlexiLigner Synchronizer',
