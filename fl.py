@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.error
 import socket
 import base64
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtWidgets, QtGui
 
 
 class Communicate(QtCore.QObject):
@@ -1181,6 +1181,7 @@ class SSettingsWindow(SettingsWindow):
 class QWidgetHide(QtWidgets.QWidget):
     def __init__ (self):
         QtWidgets.QWidget.__init__(self)
+        self.setWindowIcon(QtGui.QIcon("bin/fl_icon.png"))
         self.hide()
 
     def closeEvent(self, event):
@@ -1196,7 +1197,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.settingsw = settingsw
         self.mw = SMainWindow(self.mainw)
         self.sw = SSettingsWindow(self.settingsw)
-        self.setIcon(mainw.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        self.setIcon(QtGui.QIcon("bin/fl_icon.png"))
         self.keys_action = QtWidgets.QAction(_translate('TrayIcon', "Кейсы"), self)
         self.settings_action = QtWidgets.QAction(_translate('TrayIcon', "Настройки"), self)
         self.quit_action = QtWidgets.QAction(_translate('TrayIcon', "Выход"), self)
