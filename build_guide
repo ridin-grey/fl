@@ -1,0 +1,7 @@
+install python 3.5 64 bit
+pip install kazoo
+pip install PyQt5
+pip install cx_freeze
+install pywin32 from https://sourceforge.net/projects/pywin32/files/pywin32/Build%20220/
+python setup.py bdist_msi #make msi installer
+python setup.py build #build only binary
