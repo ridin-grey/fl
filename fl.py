@@ -640,9 +640,9 @@ def keys_locks_list_background_loop():
             if keys_locks_list and temp_keys_locks_list is None:
                 log.debug("keys_locks_list and not temp_keys_locks_list")
             else:
-                log.info("temp_keys_locks_list to keys_locks_list")
+                log.debug("temp_keys_locks_list to keys_locks_list")
                 keys_locks_list = temp_keys_locks_list
-                log.info(keys_locks_list)
+                log.debug(keys_locks_list)
         finally:
             lock_keys_locks_list_background_loop.release()
     if not threading_event.is_set():
