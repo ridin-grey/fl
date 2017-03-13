@@ -8,13 +8,13 @@ Done(maybe) | debug fork problem
 Partially | detect connect internent async with retries and add logic for fallback to internet connection lost
 add executing of maestro data
 add parsing of maestro data config for extracting maestro data directory
-change maestrodata base copying logic
+Done | change maestrodata base copying logic
 check traffic usage in idle mode
-fix local creating if locked and some step fails
-fix local removing if locked and some step fails
+Done | fix local creating if locked and some step fails
+Done | fix local removing if locked and some step fails
 merge buttons text
 move functions and exceptions into interface classes
-move update data to QThread
+Done | move update data to QThread
 rearrange text messages
 replace all outage errors by error codes
 structure debug logs
