@@ -48,7 +48,7 @@ msi_data = {"Shortcut": shortcut_table}
 bdist_msi_options = {'data': msi_data, 'upgrade_code': '{9cb335e4-90f1-4e69-8c00-131f72fd9655}'}
 
 setup(name='FlexiLigner Sync',
-      version = '0.3.3',
+      version = '0.3.4',
       author = 'Igor Zhidkov',
       author_email = 'igorzhidkoff@gmail.com',
       description = 'FlexiLigner Synchronizer',
