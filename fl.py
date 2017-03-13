@@ -186,7 +186,7 @@ class RsyncFailed(Exception):
 
 class StreamToLogger(object):
     """Fake file-like stream object that redirects writes to logger"""
-    def __init__(self, logger, log_level=logging.DEBUG):
+    def __init__(self, logger, log_level=logging.INFO):
         self.logger = logger
         self.log_level = log_level
         self.linebuf = ''
@@ -309,8 +309,8 @@ def load_logger(conf):
             raise ValueError("invalid log level: {}".format(level))
         log.setLevel(numeric_level)
         logging.getLogger('http').handlers = [fh]
-        sys.stdout = StreamToLogger(log, logging.DEBUG)
-        sys.stderr = StreamToLogger(log, logging.DEBUG)
+        sys.stdout = StreamToLogger(log, logging.INFO)
+        sys.stderr = StreamToLogger(log, logging.INFO)
     except Exception as e:
         log.info("can't initialize file logger: {}".format(repr(e)))
         raise
@@ -480,12 +480,12 @@ def rsync(cmd):
             env=rsync_env
         )
         output = rsync.communicate()
-        if rsync.returncode != 0:
+        if rsync.returncode in [35, 30, 25, 24, 23, 22, 21, 20, 14, 13, 12, 11, 10, 6, 5, 3]:
             log.info("nonzero rsync return code: %d", rsync.returncode)
             time.sleep(delay)
             continue
         else:
-            log.debug("rsync done with attempt=%d", attempt)
+            log.debug("rsync done with attempt=%d and code %d", attempt, rsync.returncode)
             break
     else:
         log.info("rsync was failed: all attempts was reached %s", ' '.join(cmd))
@@ -703,45 +703,119 @@ def init_auth_info():
         u_config['surname'] = None
         u_config['patronymic'] = None
 
-def sync_keys_from_server(keys, maestro=False):
-    log.info("from_server func")
-    fr_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + keys + "/diagnostics/MaestroData/db.dat"
-    log.info("fr_path: %s", fr_path)
-    to_path = os.path.abspath(m_config['rsync']['maestrodata']) +"/"
-    if not windows():
-        to_path = os.path.abspath(tempfile.gettempdir()) + "/"
-    log.info("to_path: %s", to_path)
-    try:
-        if maestro:
-            os.remove(os.path.join(to_path, "db.dat"))
-            rsync_copy(fr_path, to_path)
-        log.info("from_server after first rsync")
-        rsync_copy(m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + keys + "/diagnostics", os.path.abspath(os.path.join(u_config['sync_path'], keys)))
-        rsync_copy(m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + keys + "/scans", os.path.abspath(os.path.join(u_config['sync_path'], keys)))
-    except Exception as e:
-        log.info("failed rsync from server %s", repr(e))
-        raise
+class RsyncOperations(QtCore.QThread):
+    def __init__(self, keys, to_server, maestro):
+        QtCore.QThread.__init__(self)
+        self.keys = keys
+        self.to_server = to_server
+        self.maestro = maestro
+        self.has_error = False
 
-def sync_keys_to_server(keys):
-    log.info("to_server func")
-    rmpath = os.path.abspath(os.path.join(u_config['sync_path'], keys))
-    log.info("rmpath: %s", rmpath)
-    from_path = os.path.abspath(os.path.join(u_config['sync_path'], keys)) + "/diagnostics"
-    log.info("from_path to server %s", from_path)
-    try:
-        rsync_copy(from_path, m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + keys + "/")
-        shutil.rmtree(rmpath, ignore_errors=False, onerror=rmtree_fix)
-    except Exception as e:
-        log.info("failed rsync to server: %s", repr(e))
-        raise
+    def __del__(self):
+        self.wait()
+
+    def run(self):
+        if self.to_server:
+            self.do_to_server()
+        else:
+            self.do_from_server()
+
+    def do_from_server(self):
+        log.info("from_server func")
+        if self.maestro:
+            log.info("maestro processing")
+            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
+            if windows():
+                maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
+            else:
+                maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
+            try:
+                shutil.rmtree(maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
+            except FileNotFoundError as e:
+                log.info("local maestro data not found %s", repr(e))
+            except Exception as e:
+                log.info("cant delete local maestro data %s", repr(e))
+                self.has_error = True
+                return None
+            try:
+                rsync_copy(maestro_server_path, maestro_local_path)
+            except Exception as e:
+                log.info("failed maestro processing %s", repr(e))
+                self.has_error = True
+            else:
+                self.do_from_server_main()
+        else:
+            self.do_from_server_main()
+        return None
+
+    def do_from_server_main(self):
+        try:
+            log.info("diagnostics processing")
+            rsync_copy(m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics", os.path.abspath(os.path.join(u_config['sync_path'], self.keys)))
+            log.info("scans processing")
+            rsync_copy(m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/scans", os.path.abspath(os.path.join(u_config['sync_path'], self.keys)))
+        except Exception as e:
+            log.info("failed rsync from server %s", repr(e))
+            self.has_error = True
+        return None
+
+    def do_to_server(self):
+        log.info("to_server func")
+        if self.maestro:
+            log.info("maestro processing")
+            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
+            if windows():
+                maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
+            else:
+                maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
+            try:
+                rsync_copy(maestro_local_path, maestro_server_path)
+            except Exception as e:
+                log.info("failed maestro processing %s", repr(e))
+                self.has_error = True
+            else:
+                try:
+                    shutil.rmtree(maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
+                except Exception as e:
+                    log.info("cant remove local maestro %s", repr(e))
+                    self.has_error = True
+                else:
+                    self.do_to_server_main()
+        else:
+            self.do_to_server_main()
+        return None
+
+    def do_to_server_main(self):
+        keys_path = os.path.abspath(os.path.join(u_config['sync_path'], self.keys))
+        diagnostics_path = os.path.abspath(os.path.join(keys_path, "diagnostics"))
+        try:
+            log.info("diagnostics processing")
+            rsync_copy(diagnostics_path, m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/")
+        except Exception as e:
+            log.info("failed rsync to server: %s", repr(e))
+            self.has_error = True
+        else:
+            try:
+                shutil.rmtree(keys_path, ignore_errors=False, onerror=rmtree_fix)
+            except Exception as e:
+                log.info("cant remove local keys path %s", repr(e))
+                self.has_error = True
+        return None
 
 class MainWindow(Ui_MainForm):
     def to_work(self):
         _translate = QtCore.QCoreApplication.translate
         log.info("to work class")
+        self.pushButton.setDown(True)
+        self.pushButton_2.setEnabled(False)
+        self.pushButton_3.setEnabled(False)
+        self.pushButton_4.setEnabled(False)
+        self.comboBox.setEnabled(False)
         cur_keys = str(self.comboBox.currentText())
         if not cur_keys:
             self.combobox_changed()
+            self.pushButton.setDown(False)
+            self.comboBox.setEnabled(True)
             return None
         try:
             self.label_2.setText(_translate("MainForm", "Берем в работу: блокировка"))
@@ -758,16 +832,9 @@ class MainWindow(Ui_MainForm):
             if create_lock(cur_keys, lock):
                 self.label_2.setText(_translate("MainForm", "Берем в работу: загрузка"))
                 QtWidgets.qApp.processEvents()
-                sync_keys_from_server(cur_keys, maestro=True)
-                temp_keys_locks_list = list_locks()
-                global keys_locks_list
-                if keys_locks_list and temp_keys_locks_list is None:
-                    log.info("keys_locks_list and not temp_keys_locks_list")
-                    pass
-                else:
-                    log.info("temp_keys_locks_list to keys_locks_list")
-                    keys_locks_list = temp_keys_locks_list
-                self.combobox_changed()
+                self.rsync_to_work = RsyncOperations(cur_keys, to_server=False, maestro=True)
+                self.rsync_to_work.finished.connect(self.to_work_end)
+                self.rsync_to_work.start()
             else:
                 log.info('cant create lock in to work')
                 raise ValueError("cant get lock")
@@ -776,55 +843,121 @@ class MainWindow(Ui_MainForm):
             log.info("to work error %s", repr(e))
         return None
 
+    def to_work_end(self):
+        cur_keys = str(self.comboBox.currentText())
+        if self.rsync_to_work.has_error:
+            release_lock(cur_keys)
+        temp_keys_locks_list = list_locks()
+        global keys_locks_list
+        if keys_locks_list and temp_keys_locks_list is None:
+            log.info("keys_locks_list and not temp_keys_locks_list")
+            pass
+        else:
+            log.info("temp_keys_locks_list to keys_locks_list")
+            keys_locks_list = temp_keys_locks_list
+        self.combobox_changed()
+        if self.rsync_to_work.has_error:
+            self.label_2.setText(_translate("MainForm", "Ошибка взятия в работу"))
+        self.pushButton.setDown(False)
+        self.comboBox.setEnabled(True)
+        self.rsync_to_work.quit()
+        return None
+
     def end_work(self):
         _translate = QtCore.QCoreApplication.translate
+        self.pushButton.setEnabled(False)
+        self.pushButton_2.setDown(True)
+        self.pushButton_3.setEnabled(False)
+        self.pushButton_4.setEnabled(False)
+        self.comboBox.setEnabled(False)
         log.info("to_server class")
         cur_keys = str(self.comboBox.currentText())
         if not cur_keys:
             self.combobox_changed()
+            self.pushButton_2.setDown(False)
+            self.comboBox.setEnabled(True)
             return None
         try:
             self.label_2.setText(_translate("MainForm", "Вывод из работы"))
             QtWidgets.qApp.processEvents()
-            sync_keys_to_server(cur_keys)
-            release_lock(cur_keys)
-            temp_keys_locks_list = list_locks()
-            global keys_locks_list
-            if keys_locks_list and temp_keys_locks_list is None:
-                log.info("keys_locks_list and not temp_keys_locks_list")
-                pass
-            else:
-                log.info("temp_keys_locks_list to keys_locks_list")
-                keys_locks_list = temp_keys_locks_list
-            self.combobox_changed()
+            self.rsync_end_work = RsyncOperations(cur_keys, to_server=True, maestro=True)
+            self.rsync_end_work.finished.connect(self.end_work_end)
+            self.rsync_end_work.start()
         except Exception as e:
             log.info("end work error %s", repr(e))
             self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
         return None
 
+    def end_work_end(self):
+        if not self.rsync_end_work.has_error:
+            cur_keys = str(self.comboBox.currentText())
+            if release_lock(cur_keys):
+                temp_keys_locks_list = list_locks()
+                global keys_locks_list
+                if keys_locks_list and temp_keys_locks_list is None:
+                    log.info("keys_locks_list and not temp_keys_locks_list")
+                    pass
+                else:
+                    log.info("temp_keys_locks_list to keys_locks_list")
+                    keys_locks_list = temp_keys_locks_list
+            else:
+                self.combobox_changed()
+                self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
+        self.combobox_changed()
+        if self.rsync_end_work.has_error:
+            self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
+        self.pushButton_2.setDown(False)
+        self.comboBox.setEnabled(True)
+        self.rsync_end_work.quit()
+        return None
+
+
     def to_view(self):
         _translate = QtCore.QCoreApplication.translate
+        self.pushButton.setEnabled(False)
+        self.pushButton_2.setEnabled(False)
+        self.pushButton_3.setDown(True)
+        self.pushButton_4.setEnabled(False)
+        self.comboBox.setEnabled(False)
         cur_keys = str(self.comboBox.currentText())
         if not cur_keys:
             self.combobox_changed()
+            self.pushButton_3.setDown(False)
+            self.comboBox.setEnabled(True)
             return None
         try:
             log.info("try get to view")
             self.label_4.setText(_translate("MainForm", "Загрузка для просмотра"))
             QtWidgets.qApp.processEvents()
-            sync_keys_from_server(cur_keys)
-            self.combobox_changed()
-        except Exceptiona as e:
+            self.rsync_to_view = RsyncOperations(cur_keys, to_server=False, maestro=False)
+            self.rsync_to_view.finished.connect(self.to_view_end)
+            self.rsync_to_view.start()
+        except Exception as e:
             log.info("get to view error %s", repr(e))
             self.label_4.setText(_translate("MainForm", "Ошибка загрузки для просмотра"))
         return None
 
+    def to_view_end(self):
+        self.combobox_changed()
+        if self.rsync_to_view.has_error:
+            self.label_4.setText(_translate("MainForm", "Ошибка загрузки для просмотра"))
+        self.pushButton_3.setDown(False)
+        self.comboBox.setEnabled(True)
+        self.rsync_to_view.quit()
+        return None
 
     def end_view(self):
         _translate = QtCore.QCoreApplication.translate
+        self.pushButton.setEnabled(False)
+        self.pushButton_2.setEnabled(False)
+        self.pushButton_3.setEnabled(False)
+        self.pushButton_4.setDown(True)
+        self.comboBox.setEnabled(False)
         cur_keys = str(self.comboBox.currentText())
         if not cur_keys:
             self.combobox_changed()
+            self.pushButton_4.setDown(False)
+            self.comboBox.setEnabled(True)
             return None
         rmpath = os.path.abspath(os.path.join(u_config['sync_path'], cur_keys))
         try:
@@ -836,6 +969,8 @@ class MainWindow(Ui_MainForm):
         except Exception as e:
             log.info("end view error %s", repr(e))
             self.label_4.setText(_translate("MainForm", "Ошибка завершения просмотра"))
+        self.pushButton_4.setDown(False)
+        self.comboBox.setEnabled(True)
         return None
 
     def combobox_changed(self):
@@ -1230,11 +1365,13 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             self.keys_action.setEnabled(False)
         self.mw.comboupdate()
         self.mw.combobox_changed()
+        QtWidgets.qApp.processEvents()
 
 
     def quit_app(self):
         self.mainw.hide()
         self.settingsw.hide()
+        QtWidgets.qApp.processEvents()
         QtWidgets.qApp.quit()
 
     def clicked_detect(self, reason):
@@ -1287,7 +1424,6 @@ def main():
         """init zookeeper connection"""
         global zk
         zk = init_kazoo_client(m_config['zookeeper'])
-
         global auth_info
         if 'auth' in u_config:
             auth_info = get_auth_info(u_config['auth'])
@@ -1312,8 +1448,6 @@ def main():
         tray = TrayIcon(mwindow, swindow)
         log.info("before show mwindow")
         tray.show()
-#            mwindow.show()
-#        swindow.show()
 
         app.exec()
 
@@ -1330,12 +1464,11 @@ def main():
         deinit_kazoo_client(zk)
         log.info("setting threading_event")
         threading_event.set()
-        for i in range(0, 10):
+        for i in range(0, 6):
             active = threading.active_count()
             log.info("active %d", active)
             if active == 1:
                 break
-            log.info(threading.enumerate())
             log.info("sleeping 1 attempt %d", i)
             time.sleep(1)
         ssh_key.remove()
