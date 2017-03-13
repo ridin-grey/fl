@@ -8,7 +8,7 @@ import sys
 base = 'Win32GUI' if sys.platform=='win32' else None
 
 executables = [
-    Executable('fl.py', base=base, targetName = 'FlexiLigner.exe')
+    Executable('fl.py', base=base, targetName = 'FlexiLigner.exe', icon='fl_icon.ico')
 ]
 
 
