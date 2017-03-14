@@ -817,6 +817,25 @@ class MainWindow(Ui_MainForm):
             self.pushButton.setDown(False)
             self.comboBox.setEnabled(True)
             return None
+        for iter_keys in keys_locks_list:
+            iter_lock_content = get_lock_content(iter_keys)
+            if iter_lock_content is not None:
+                log.info("try load json from iter lock")
+                try:
+                    iter_lock_json = json.loads(iter_lock_content.decode())
+                    if not 'id' in iter_lock_json:
+                        continue
+                    if not 'username' in iter_lock_json:
+                        continue
+                    if iter_lock_json['id'] == u_config['id'] and iter_lock_json['username'] == u_config['username']:
+                        self.combobox_changed()
+                        self.label_2.setText(_translate("MainForm", "Уже в работе кейс {}".format(iter_keys)))
+                        self.pushButton.setDown(False)
+                        self.comboBox.setEnabled(True)
+                        return None
+                except Exception as e:
+                    log.info("cant iterate %s", repr(e))
+                    continue
         try:
             self.label_2.setText(_translate("MainForm", "Берем в работу: блокировка"))
             QtWidgets.qApp.processEvents()
@@ -844,6 +863,7 @@ class MainWindow(Ui_MainForm):
         return None
 
     def to_work_end(self):
+        _translate = QtCore.QCoreApplication.translate
         cur_keys = str(self.comboBox.currentText())
         if self.rsync_to_work.has_error:
             release_lock(cur_keys)
@@ -889,6 +909,7 @@ class MainWindow(Ui_MainForm):
         return None
 
     def end_work_end(self):
+        _translate = QtCore.QCoreApplication.translate
         if not self.rsync_end_work.has_error:
             cur_keys = str(self.comboBox.currentText())
             if release_lock(cur_keys):
@@ -905,6 +926,7 @@ class MainWindow(Ui_MainForm):
                 self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
         self.combobox_changed()
         if self.rsync_end_work.has_error:
+            log.info("end work error")
             self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
         self.pushButton_2.setDown(False)
         self.comboBox.setEnabled(True)
@@ -938,6 +960,7 @@ class MainWindow(Ui_MainForm):
         return None
 
     def to_view_end(self):
+        _translate = QtCore.QCoreApplication.translate
         self.combobox_changed()
         if self.rsync_to_view.has_error:
             self.label_4.setText(_translate("MainForm", "Ошибка загрузки для просмотра"))
