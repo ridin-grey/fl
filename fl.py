@@ -239,6 +239,8 @@ def change_acl_for_delete_win(path):
 
 def rmtree_fix(func, path, exc_info):
     import stat
+    if isinstance(exc_info[1], FileNotFoundError):
+        return None
     try:
         log.info("rmtree fix")
         os.chmod(path, stat.S_IWUSR)
