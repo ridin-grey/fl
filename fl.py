@@ -482,7 +482,7 @@ def rsync(cmd):
             env=rsync_env
         )
         output = rsync.communicate()
-        if rsync.returncode in [35, 30, 25, 24, 23, 22, 21, 20, 14, 13, 12, 11, 10, 6, 5, 3]:
+        if rsync.returncode != 0:
             log.info("nonzero rsync return code: %d", rsync.returncode)
             time.sleep(delay)
             continue
