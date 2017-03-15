@@ -15,7 +15,6 @@ import datetime
 import urllib.request
 import urllib.parse
 import urllib.error
-import socket
 import base64
 from PyQt5 import QtCore, QtWidgets, QtGui
 
@@ -173,7 +172,6 @@ class Ui_SettingsForm(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), _translate("SettingsForm", "Папка синхронизации"))
 
 log = logging.getLogger('flexilignersync')
-
 lock_keys_list_background_loop = threading.Lock()
 lock_keys_locks_list_background_loop = threading.Lock()
 threading_event = threading.Event()
@@ -203,13 +201,13 @@ class StreamToLogger(object):
 def get_current_workdir():
     if getattr(sys, 'frozen', False):
         # The application is frozen
-        workdir = os.path.dirname(os.path.abspath(sys.executable))
-        log.info("frozen app, workdir is %s", workdir)
+        workdir_cur = os.path.dirname(os.path.abspath(sys.executable))
+        log.info("frozen app, workdir is %s", workdir_cur)
     else:
         # The application is not frozen
-        workdir = os.path.dirname(os.path.abspath(__file__))
-        log.info("not frozen app, workdir is %s", workdir)
-    return workdir
+        workdir_cur = os.path.dirname(os.path.abspath(__file__))
+        log.info("not frozen app, workdir is %s", workdir_cur)
+    return workdir_cur
 
 def change_acl_for_delete_win(path):
     """Zaps the SECURITY_DESCRIPTOR's DACL on a directory entry that is tedious to
@@ -279,7 +277,7 @@ class SshKey:
             os.remove(self.path)
         except Exception as e:
             try:
-                os.write(self.fd,"0".encode())
+                os.write(self.fd, "0".encode())
             except Exception as e1:
                 log.info("cant truncate ssh key file %s, %s", self.path, repr(e1))
             log.info("cant delete ssh key file %s, %s", self.path, repr(e))
@@ -298,8 +296,7 @@ def load_logger(conf):
         if not os.path.exists(logdir):
             os.makedirs(logdir, mode=0o755)
     except Exception as e:
-        log.info("can't create log directory {}: {}".format(
-            logdir, repr(e)))
+        log.info("can't create log directory %s: %s", logdir, repr(e))
         raise
     try:
         fh = logging.FileHandler(path, encoding='UTF-8')
@@ -314,7 +311,7 @@ def load_logger(conf):
         sys.stdout = StreamToLogger(log, logging.INFO)
         sys.stderr = StreamToLogger(log, logging.INFO)
     except Exception as e:
-        log.info("can't initialize file logger: {}".format(repr(e)))
+        log.info("can't initialize file logger: %s", repr(e))
         raise
 
 def windows():
@@ -333,9 +330,9 @@ def init_kazoo_client(conf):
     delay = float(conf['attempts_delay'])
     hosts = conf['host']
     timeout = float(conf['timeout'])
-    credential = ':'.join((conf['user'],
-                          conf['pass_digest']))
-    auth_data = [('digest', credential)]
+#    credential = ':'.join((conf['user'],
+#                          conf['pass_digest']))
+#    auth_data = [('digest', credential)]
     # http://kazoo.readthedocs.io/en/latest/api/retry.html#kazoo.retry.KazooRetry
     retry_params = dict(
         max_tries=attempts,
@@ -343,24 +340,24 @@ def init_kazoo_client(conf):
     )
     # http://kazoo.readthedocs.io/en/latest/api/client.html#kazoo.client.KazooClient
     log.info("createing client")
-    zk = KazooClient(
+    zk_cl = KazooClient(
         hosts=hosts,
         timeout=timeout,
-    #    auth_data=auth_data,
+#    auth_data=auth_data,
         connection_retry=retry_params,
         command_retry=retry_params,
     )
     try:
         log.info("connecting to zookeeper")
-        zk.start()
-        zk.add_auth('digest', credential)
+        zk_cl.start()
+    #    zk_cl.add_auth('digest', credential)
     except Exception as e:
         msg = "zookeeper connection was failed: {}".format(repr(e))
         log.info(msg)
         raise
     else:
         log.info("connected to zookeeper")
-    return zk
+    return zk_cl
 
 def deinit_kazoo_client(zk):
     """Disconnect from zookeeper and cleanup kazoo client."""
@@ -434,13 +431,15 @@ def list_locks():
         try:
             log.debug("gettings list of locks")
             locks = zk.retry(zk.get_children, locks_base_path)
+        except NoNodeError:
+            log.info("root node %s doesnt exist", locks_base_path)
         except Exception as e:
             log.info("getting locks list failed: %s", repr(e))
             locks = None
     return locks
 
 def get_lock_content(lock_path):
-    content = None
+    content = str()
     full_lock_path = m_config['zookeeper']['node_path'] + "/" + lock_path
     try:
         log.info("getting content of lock %s", full_lock_path)
@@ -448,6 +447,7 @@ def get_lock_content(lock_path):
     except NoNodeError:
         log.info("lock %s doesnt exist", full_lock_path)
     except Exception as e:
+        content = None
         log.info("cant get content of lock %s", full_lock_path)
     return content
 
@@ -461,7 +461,7 @@ def convert_win_path(path):
     path_final = str()
     try:
         log.debug("convert win path from: %s", path)
-        path = path.replace("\\","/")
+        path = path.replace("\\", "/")
         path_final = re.sub("^([A-Z]):", r"/cygdrive/\1", path)
     except Exception as e:
         log.info("cant convert win path: %s", repr(e))
@@ -474,24 +474,24 @@ def rsync(cmd):
 
     for attempt in attempts:
         log.debug("trying rsync, attempt=%d", attempt)
-        rsync = Popen(' '.join(cmd),
+        rsync_sub = Popen(' '.join(cmd),
             stdout=PIPE,
             stderr=PIPE,
             universal_newlines=True,
             shell=True,
             env=rsync_env
         )
-        output = rsync.communicate()
-        if rsync.returncode != 0:
-            log.info("nonzero rsync return code: %d", rsync.returncode)
+        output = rsync_sub.communicate()
+        if rsync_sub.returncode != 0:
+            log.info("nonzero rsync return code: %d", rsync_sub.returncode)
             time.sleep(delay)
             continue
         else:
-            log.debug("rsync done with attempt=%d and code %d", attempt, rsync.returncode)
+            log.debug("rsync done with attempt=%d and code %d", attempt, rsync_sub.returncode)
             break
     else:
         log.info("rsync was failed: all attempts was reached %s", ' '.join(cmd))
-        raise RsyncFailed("Rsync failed after {} attempts with code {} and reason {}".format(attempts, rsync.returncode, output[1]))
+        raise RsyncFailed("Rsync failed after {} attempts with code {} and reason {}".format(attempts, rsync_sub.returncode, output[1]))
     return output
 
 def rsync_copy(from_path, to_path):
@@ -583,7 +583,7 @@ def parse_main_config(path):
             conf = json.load(f, encoding='utf-8')
         return conf
     except Exception as e:
-        log.info("can't load config file {}: {}".format(path, repr(e)))
+        log.info("can't load config file %s: %s", path, repr(e))
         raise
 
 def parse_user_config(path):
@@ -654,31 +654,17 @@ def keys_locks_list_background_loop():
 def auth_request(login, password):
 
     try:
-        details = urllib.parse.urlencode({ 'login': login, 'pass': password }).encode()
+        details = urllib.parse.urlencode({'login': login, 'pass': password}).encode()
         url = urllib.request.Request(m_config['auth']['handler'], details)
         url.add_header("User-Agent","Mozilla/5.0 (Windows; U; Windows NT 6.0; en-US) AppleWebKit/525.13 (KHTML, like Gecko) Chrome/0.2.149.29 Safari/525.13")
 
         responseData = urllib.request.urlopen(url).read().decode('utf8', 'ignore')
-        responseFail = False
-
     except urllib.error.HTTPError as e:
         responseData = e.read().decode('utf8', 'ignore')
-        responseFail = False
-
-    except urllib.error.URLError:
-        responseFail = True
-
-    except socket.error:
-        responseFail = True
-
-    except socket.timeout:
-        responseFail = True
-
     except UnicodeEncodeError:
         log.info("[x]  Encoding Error")
-        responseFail = True
-
-
+    except Exception as e:
+        log.info("cant make post auth request %s", repr(e))
     return responseData
 
 def get_auth_info(conf):
@@ -705,13 +691,19 @@ def init_auth_info():
         u_config['surname'] = None
         u_config['patronymic'] = None
 
+
 class RsyncOperations(QtCore.QThread):
+
     def __init__(self, keys, to_server, maestro):
         QtCore.QThread.__init__(self)
         self.keys = keys
         self.to_server = to_server
         self.maestro = maestro
         self.has_error = False
+        if windows():
+            self.maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
+        else:
+            self.maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
 
     def __del__(self):
         self.wait()
@@ -727,12 +719,8 @@ class RsyncOperations(QtCore.QThread):
         if self.maestro:
             log.info("maestro processing")
             maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
-            if windows():
-                maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
-            else:
-                maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
             try:
-                shutil.rmtree(maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
+                shutil.rmtree(self.maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
             except FileNotFoundError as e:
                 log.info("local maestro data not found %s", repr(e))
             except Exception as e:
@@ -740,17 +728,11 @@ class RsyncOperations(QtCore.QThread):
                 self.has_error = True
                 return None
             try:
-                rsync_copy(maestro_server_path, maestro_local_path)
+                rsync_copy(maestro_server_path, self.maestro_local_path)
             except Exception as e:
                 log.info("failed maestro processing %s", repr(e))
                 self.has_error = True
-            else:
-                self.do_from_server_main()
-        else:
-            self.do_from_server_main()
-        return None
-
-    def do_from_server_main(self):
+                return None
         try:
             log.info("diagnostics processing")
             rsync_copy(m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics", os.path.abspath(os.path.join(u_config['sync_path'], self.keys)))
@@ -761,33 +743,9 @@ class RsyncOperations(QtCore.QThread):
             self.has_error = True
         return None
 
+
     def do_to_server(self):
         log.info("to_server func")
-        if self.maestro:
-            log.info("maestro processing")
-            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
-            if windows():
-                maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
-            else:
-                maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
-            try:
-                rsync_copy(maestro_local_path, maestro_server_path)
-            except Exception as e:
-                log.info("failed maestro processing %s", repr(e))
-                self.has_error = True
-            else:
-                try:
-                    shutil.rmtree(maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
-                except Exception as e:
-                    log.info("cant remove local maestro %s", repr(e))
-                    self.has_error = True
-                else:
-                    self.do_to_server_main()
-        else:
-            self.do_to_server_main()
-        return None
-
-    def do_to_server_main(self):
         keys_path = os.path.abspath(os.path.join(u_config['sync_path'], self.keys))
         diagnostics_path = os.path.abspath(os.path.join(keys_path, "diagnostics"))
         try:
@@ -796,15 +754,66 @@ class RsyncOperations(QtCore.QThread):
         except Exception as e:
             log.info("failed rsync to server: %s", repr(e))
             self.has_error = True
-        else:
+            return None
+        if self.maestro:
+            log.info("maestro processing")
+            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
             try:
-                shutil.rmtree(keys_path, ignore_errors=False, onerror=rmtree_fix)
+                rsync_copy(self.maestro_local_path, maestro_server_path)
             except Exception as e:
-                log.info("cant remove local keys path %s", repr(e))
+                log.info("failed maestro processing %s", repr(e))
                 self.has_error = True
+                return None
+            else:
+                try:
+                    shutil.rmtree(self.maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
+                except Exception as e:
+                    log.info("cant remove local maestro %s", repr(e))
+                    self.has_error = True
+                    return None
+        try:
+            shutil.rmtree(keys_path, ignore_errors=False, onerror=rmtree_fix)
+        except Exception as e:
+            log.info("cant remove local keys path %s", repr(e))
+            self.has_error = True
         return None
 
+
 class MainWindow(Ui_MainForm):
+
+    def has_user_locks(self, button):
+        _translate = QtCore.QCoreApplication.translate
+        for iter_keys in keys_locks_list:
+            iter_lock_content = get_lock_content(iter_keys)
+            if not iter_lock_content:
+                continue
+            if iter_lock_content is not None:
+                log.info("try load json from iter lock")
+                try:
+                    iter_lock_json = json.loads(iter_lock_content.decode())
+                    if 'id' not in iter_lock_json:
+                        continue
+                    if 'username' not in iter_lock_json:
+                        continue
+                    if iter_lock_json['id'] == u_config['id'] and iter_lock_json['username'] == u_config['username']:
+                        self.combobox_changed()
+                        self.label_2.setText(_translate("MainForm", "Уже в работе кейс {}".format(iter_keys)))
+                        button.setDown(False)
+                        self.comboBox.setEnabled(True)
+                        return True
+                except Exception as e:
+                    log.info("cant iterate %s", repr(e))
+                    continue
+            else:
+                self.combobox_changed()
+                self.label_2.setText(_translate("MainForm", "Ошибка проверки блокировок"))
+                button.setDown(False)
+                self.comboBox.setEnabled(True)
+                return True
+        else:
+            log.info("no locks for current user found")
+            return False
+
     def to_work(self):
         _translate = QtCore.QCoreApplication.translate
         log.info("to work class")
@@ -819,25 +828,9 @@ class MainWindow(Ui_MainForm):
             self.pushButton.setDown(False)
             self.comboBox.setEnabled(True)
             return None
-        for iter_keys in keys_locks_list:
-            iter_lock_content = get_lock_content(iter_keys)
-            if iter_lock_content is not None:
-                log.info("try load json from iter lock")
-                try:
-                    iter_lock_json = json.loads(iter_lock_content.decode())
-                    if not 'id' in iter_lock_json:
-                        continue
-                    if not 'username' in iter_lock_json:
-                        continue
-                    if iter_lock_json['id'] == u_config['id'] and iter_lock_json['username'] == u_config['username']:
-                        self.combobox_changed()
-                        self.label_2.setText(_translate("MainForm", "Уже в работе кейс {}".format(iter_keys)))
-                        self.pushButton.setDown(False)
-                        self.comboBox.setEnabled(True)
-                        return None
-                except Exception as e:
-                    log.info("cant iterate %s", repr(e))
-                    continue
+        if self.has_user_locks(self.pushButton):
+            return None
+
         try:
             self.label_2.setText(_translate("MainForm", "Берем в работу: блокировка"))
             QtWidgets.qApp.processEvents()
@@ -858,7 +851,8 @@ class MainWindow(Ui_MainForm):
                 self.rsync_to_work.start()
             else:
                 log.info('cant create lock in to work')
-                raise ValueError("cant get lock")
+                self.to_work_end()
+                self.label_2.setText(_translate("MainForm", "Ошибка: не смогли заблокировать"))
         except Exception as e:
             self.label_2.setText(_translate("MainForm", "Ошибка взятия в работу"))
             log.info("to work error %s", repr(e))
@@ -882,7 +876,8 @@ class MainWindow(Ui_MainForm):
             self.label_2.setText(_translate("MainForm", "Ошибка взятия в работу"))
         self.pushButton.setDown(False)
         self.comboBox.setEnabled(True)
-        self.rsync_to_work.quit()
+        if self.rsync_to_work:
+            self.rsync_to_work.quit()
         return None
 
     def end_work(self):
@@ -923,18 +918,19 @@ class MainWindow(Ui_MainForm):
                 else:
                     log.info("temp_keys_locks_list to keys_locks_list")
                     keys_locks_list = temp_keys_locks_list
+                self.combobox_changed()
             else:
                 self.combobox_changed()
-                self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
-        self.combobox_changed()
-        if self.rsync_end_work.has_error:
+                self.label_2.setText(_translate("MainForm", "Ошибка: не смогли разблокировать"))
+        else:
+            self.combobox_changed()
             log.info("end work error")
             self.label_2.setText(_translate("MainForm", "Ошибка вывода из работы"))
         self.pushButton_2.setDown(False)
         self.comboBox.setEnabled(True)
-        self.rsync_end_work.quit()
+        if self.rsync_end_work:
+            self.rsync_end_work.quit()
         return None
-
 
     def to_view(self):
         _translate = QtCore.QCoreApplication.translate
@@ -949,11 +945,14 @@ class MainWindow(Ui_MainForm):
             self.pushButton_3.setDown(False)
             self.comboBox.setEnabled(True)
             return None
+        if self.has_user_locks(self.pushButton_3):
+            return None
+
         try:
             log.info("try get to view")
             self.label_4.setText(_translate("MainForm", "Загрузка для просмотра"))
             QtWidgets.qApp.processEvents()
-            self.rsync_to_view = RsyncOperations(cur_keys, to_server=False, maestro=False)
+            self.rsync_to_view = RsyncOperations(cur_keys, to_server=False, maestro=True)
             self.rsync_to_view.finished.connect(self.to_view_end)
             self.rsync_to_view.start()
         except Exception as e:
@@ -968,7 +967,8 @@ class MainWindow(Ui_MainForm):
             self.label_4.setText(_translate("MainForm", "Ошибка загрузки для просмотра"))
         self.pushButton_3.setDown(False)
         self.comboBox.setEnabled(True)
-        self.rsync_to_view.quit()
+        if self.rsync_to_view:
+            self.rsync_to_view.quit()
         return None
 
     def end_view(self):
@@ -984,15 +984,39 @@ class MainWindow(Ui_MainForm):
             self.pushButton_4.setDown(False)
             self.comboBox.setEnabled(True)
             return None
+        if self.has_user_locks(self.pushButton_4):
+            return None
+
         rmpath = os.path.abspath(os.path.join(u_config['sync_path'], cur_keys))
+        log.info("try end view %s", rmpath)
+        self.label_4.setText(_translate("MainForm", "Завершение просмотра"))
+        QtWidgets.qApp.processEvents()
+
+        if windows():
+            maestro_local_path = os.path.abspath(m_config['rsync']['maestrodata'])
+        else:
+            maestro_local_path = os.path.abspath(os.path.join(tempfile.gettempdir(), "MaestroData"))
         try:
-            log.info("try end view %s", rmpath)
-            self.label_4.setText(_translate("MainForm", "Завершение просмотра"))
-            QtWidgets.qApp.processEvents()
+            shutil.rmtree(maestro_local_path, ignore_errors=False, onerror=rmtree_fix)
+        except FileNotFoundError as e:
+            log.info("local maestro data not found %s", repr(e))
+        except Exception as e:
+            log.info("end view error remove maestrodata %s", repr(e))
+            self.combobox_changed()
+            self.label_4.setText(_translate("MainForm", "Ошибка завершения просмотра"))
+            self.pushButton_4.setDown(False)
+            self.comboBox.setEnabled(True)
+            return None
+
+        try:
             shutil.rmtree(rmpath, ignore_errors=False, onerror=rmtree_fix)
             self.combobox_changed()
+        except FileNotFoundError as e:
+            self.combobox_changed()
+            log.info("end view local data not found %s", repr(e))
         except Exception as e:
             log.info("end view error %s", repr(e))
+            self.combobox_changed()
             self.label_4.setText(_translate("MainForm", "Ошибка завершения просмотра"))
         self.pushButton_4.setDown(False)
         self.comboBox.setEnabled(True)
@@ -1010,7 +1034,7 @@ class MainWindow(Ui_MainForm):
             self.label_4.setText(_translate("MainForm", " "))
             return None
         cur_keys = str(self.comboBox.currentText())
-        if not keys_list:
+        if not keys_list or keys_locks_list is None:
             self.pushButton.setEnabled(False)
             self.pushButton_2.setEnabled(False)
             self.pushButton_3.setEnabled(False)
@@ -1028,7 +1052,7 @@ class MainWindow(Ui_MainForm):
             self.label_3.setText(_translate("MainForm", " "))
             self.label_4.setText(_translate("MainForm", " "))
             return None
-        if not cur_keys in keys_list:
+        if cur_keys not in keys_list:
             self.pushButton.setEnabled(False)
             self.pushButton_2.setEnabled(False)
             self.pushButton_3.setEnabled(False)
@@ -1120,8 +1144,8 @@ class MainWindow(Ui_MainForm):
                 self.pushButton_2.setEnabled(False)
                 self.pushButton_3.setEnabled(False)
                 self.pushButton_4.setEnabled(False)
-                self.label_2.setText(_translate("MainForm", " "))
-                self.label_3.setText(_translate("MainForm", " "))
+                self.label_2.setText(_translate("MainForm", "Ошибка 5:"))
+                self.label_3.setText(_translate("MainForm", "Не получили информацию по кейсу"))
                 self.label_4.setText(_translate("MainForm", " "))
             return None
 
@@ -1149,7 +1173,9 @@ class MainWindow(Ui_MainForm):
         self.comboBox.addItems(self.combo_items)
         return None
 
+
 class SMainWindow(MainWindow):
+
     def __init__(self, MainWindow):
         # Be sure to call the super class method
         log.info("init main window")
@@ -1162,7 +1188,6 @@ class SMainWindow(MainWindow):
         self.connect_slots()
         log.info("init main window finished")
 
-
     def connect_slots(self):
         self.pushButton.clicked.connect(self.to_work)
         self.pushButton_2.clicked.connect(self.end_work)
@@ -1173,7 +1198,9 @@ class SMainWindow(MainWindow):
         self.comboBox.editTextChanged.connect(self.comboupdate)
         return None
 
+
 class SettingsWindow(Ui_SettingsForm):
+
     def login(self):
         log.info("settings login call")
         if auth_info['success']:
@@ -1183,6 +1210,7 @@ class SettingsWindow(Ui_SettingsForm):
         self.up_auth.auth_up.emit()
         self.auth_edited()
         return None
+
     def do_login(self):
         global auth_info
         login = str(self.lineEdit.text())
@@ -1239,14 +1267,17 @@ class SettingsWindow(Ui_SettingsForm):
             log.info("cant update config %s", repr(e))
         self.update_fields()
         return None
+
     def cancel(self):
         self.update_fields()
         self.do_login()
         self.up_auth.auth_up.emit()
         self.auth_edited()
         return None
+
     def select_folder(self):
         return None
+
     def update_fields(self):
         log.info("update fields call")
         _translate = QtCore.QCoreApplication.translate
@@ -1255,7 +1286,7 @@ class SettingsWindow(Ui_SettingsForm):
         self.lineEdit.clear()
         self.lineEdit_2.clear()
         self.lineEdit_3.clear()
-        if not 'user_sync_path' in u_config:
+        if 'user_sync_path' not in u_config:
             self.lineEdit_3.setPlaceholderText(_translate("SettingsForm", u_config['sync_path']))
         else:
             self.lineEdit_3.setText(_translate("SettingsForm", u_config['user_sync_path']))
@@ -1267,6 +1298,7 @@ class SettingsWindow(Ui_SettingsForm):
         self.auth_edited()
         log.info("update fields call end")
         return None
+
     def auth_edited(self):
         log.info("auth edited call")
         _translate = QtCore.QCoreApplication.translate
@@ -1287,6 +1319,7 @@ class SettingsWindow(Ui_SettingsForm):
         self.check_change()
         log.info("auth edited call end")
         return None
+
     def check_change(self):
         log.info("check change call")
         self.pushButton_2.setEnabled(False)
@@ -1310,13 +1343,14 @@ class SettingsWindow(Ui_SettingsForm):
                 if u_config['auth']['password'] != password:
                     self.pushButton_2.setEnabled(True)
             else:
-                if passord:
+                if password:
                     self.pushButton_2.setEnabled(True)
         else:
             if login or password:
                 self.pushButton_2.setEnabled(True)
         log.info("check change call end")
         return None
+
 
 class SSettingsWindow(SettingsWindow):
 
@@ -1412,7 +1446,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
 def main():
     """Main function."""
     try:
-        """Parsing main and user configs, init some vars"""
+        #Parsing main and user configs, init some vars
         global workdir
         workdir = get_current_workdir()
         # init main config
@@ -1446,7 +1480,7 @@ def main():
         # init local directory where to sync from server
         init_sync_path()
 
-        """init zookeeper connection"""
+        #init zookeeper connection
         global zk
         zk = init_kazoo_client(m_config['zookeeper'])
         global auth_info
@@ -1456,7 +1490,7 @@ def main():
             auth_info = dict(success=False)
         log.info(auth_info)
         init_auth_info()
-        """init async background operations"""
+        #init async background operations
         # init keys list background updater
         keys_list_background_loop()
 
