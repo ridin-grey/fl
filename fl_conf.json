@@ -1,5 +1,4 @@
 {
-    "environment": "test",
     "rsync": {
         "attempts": 3,
         "attempts_delay": 1,
@@ -19,16 +18,11 @@
 	"attempts_delay": 1,
 	"timeout": 5,
         "host": "s9ffd144a.fastvps-server.com:2181",
-	"node_path": "/fl",
-	"user": "flexiligner",
-	"pass_digest": "flexiligner"
+	"node_path": "/fl"
     },
     "auth": {
-	"handler": "http://ridinger.ru/user/get-login",
-	"login": "rom-s.alo@mail.ruq",
-	"password": "123456"
+	"handler": "http://ridinger.ru/user/get-login"
     },
-    "keys": 125,
     "default_sync_path": "~/FlexiLigner/",
     "user_config_path": "~/AppData/Local/FlexiLigner/fl_user_conf.json",
     "keys_list_background_delay": 5,
