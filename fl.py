@@ -757,7 +757,7 @@ class RsyncOperations(QtCore.QThread):
             return None
         if self.maestro:
             log.info("maestro processing")
-            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/MaestroData/"
+            maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/"
             try:
                 rsync_copy(self.maestro_local_path, maestro_server_path)
             except Exception as e:
@@ -1490,6 +1490,7 @@ def main():
             auth_info = dict(success=False)
         log.info(auth_info)
         init_auth_info()
+        #release_lock("97")
         #init async background operations
         # init keys list background updater
         keys_list_background_loop()
