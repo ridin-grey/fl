@@ -511,6 +511,24 @@ def rsync_copy(from_path, to_path):
 
     return rsync(cmd)
 
+def rsync_copy_rules(from_path, to_path):
+    log.info("rsync copy from %s to %s", from_path, to_path)
+    cmd = [
+        'rsync',
+        '-rlgDHh',
+        '--timeout={}'.format(m_config['rsync']['timeout']),
+        '--delete',
+        '--chmod=ugo=rwX',
+        '--progress',
+        '--append-verify',
+        '-e',
+        '"ssh {}"'.format(rsync_ssh_opts),
+        '"{}"'.format(convert_win_path(from_path)),
+        '"{}"'.format(convert_win_path(to_path))
+        ]
+
+    return rsync(cmd)
+
 def rsync_list_server_dirs(path):
     cmd = [
         'rsync',
@@ -728,7 +746,7 @@ class RsyncOperations(QtCore.QThread):
                 self.has_error = True
                 return None
             try:
-                rsync_copy(maestro_server_path, self.maestro_local_path)
+                rsync_copy_rules(maestro_server_path, self.maestro_local_path)
             except Exception as e:
                 log.info("failed maestro processing %s", repr(e))
                 self.has_error = True
