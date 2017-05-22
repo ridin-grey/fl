@@ -512,7 +512,7 @@ def rsync_copy(from_path, to_path):
     return rsync(cmd)
 
 def rsync_copy_rules(from_path, to_path):
-    log.info("rsync copy from %s to %s", from_path, to_path)
+    log.info("rsync copy with hardcode rules from %s to %s", from_path, to_path)
     cmd = [
         'rsync',
         '-rlgDHh',
@@ -521,6 +521,22 @@ def rsync_copy_rules(from_path, to_path):
         '--chmod=ugo=rwX',
         '--progress',
         '--append-verify',
+        '-e',
+        '"ssh {}"'.format(rsync_ssh_opts),
+        '"{}"'.format(convert_win_path(from_path)),
+        '"{}"'.format(convert_win_path(to_path))
+        ]
+
+    return rsync(cmd)
+
+def rsync_copy_maestro(from_path, to_path):
+    log.info("rsync copy maestro from %s to %s", from_path, to_path)
+    cmd = [
+        'rsync',
+        '-rlgDHh',
+        '--timeout={}'.format(m_config['rsync']['timeout']),
+        '--delete',
+        '--progress',
         '-e',
         '"ssh {}"'.format(rsync_ssh_opts),
         '"{}"'.format(convert_win_path(from_path)),
@@ -777,7 +793,7 @@ class RsyncOperations(QtCore.QThread):
             log.info("maestro processing")
             maestro_server_path = m_config['rsync']['server'] + ":" + m_config['rsync']['keys_path'] + self.keys + "/diagnostics/"
             try:
-                rsync_copy(self.maestro_local_path, maestro_server_path)
+                rsync_copy_maestro(self.maestro_local_path, maestro_server_path)
             except Exception as e:
                 log.info("failed maestro processing %s", repr(e))
                 self.has_error = True
@@ -1539,7 +1555,10 @@ def main():
         log.info("unhandled sys exit %s", repr(e))
         return True
     finally:
-        deinit_kazoo_client(zk)
+        try:
+            deinit_kazoo_client(zk)
+        except:
+            pass
         log.info("setting threading_event")
         threading_event.set()
         for i in range(0, 6):
